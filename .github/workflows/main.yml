@@ -87,10 +87,3 @@ jobs:
           name: Lesvos-Basket-SIGNED-AAB-v3
           path: android-build/**/*.aab
           if-no-files-found: error
-
-      - name: Upload SIGNED AAB
-        uses: actions/upload-artifact@v4
-        with:
-          name: Lesvos-Basket-SIGNED-v2
-          path: ${{ env.AAB }}
-          if-no-files-found: error 
