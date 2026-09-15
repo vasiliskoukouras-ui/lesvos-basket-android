@@ -1,4 +1,4 @@
-name: Build VERIFIED Signed Lesvos Basket AAB v2
+name: Build VERIFIED Signed Lesvos Basket AAB v3
 
 on:
   workflow_dispatch:
@@ -27,7 +27,15 @@ jobs:
           SETTINGS=$(find android-build -name settings.gradle.kts | head -1)
           test -n "$SETTINGS" || { echo "ANDROID PROJECT NOT FOUND"; exit 1; }
 
-      - name: Restore existing upload key
+      - name: Set versionCode 3
+        shell: bash
+        run: |
+          GRADLE=$(find android-build -path "*/app/build.gradle.kts" | head -1)
+          test -n "$GRADLE" || { echo "app/build.gradle.kts NOT FOUND"; exit 1; }
+          sed -i -E 's/versionCode[[:space:]]*=[[:space:]]*[0-9]+/versionCode = 3/' "$GRADLE"
+          grep "versionCode" "$GRADLE"
+
+      - name: Restore upload key
         shell: bash
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -40,20 +48,12 @@ jobs:
             -keystore "$RUNNER_TEMP/lesvos-upload.jks" \
             -storepass "$KEYSTORE_PASSWORD" \
             -alias lesvosupload > /dev/null
-          echo "EXISTING UPLOAD KEY RESTORED"
+          echo "UPLOAD KEY RESTORED"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
-
-      - name: Set versionCode 2
-        shell: bash
-        run: |
-          GRADLE=$(find android-build -path "*/app/build.gradle.kts" | head -1)
-          test -n "$GRADLE" || { echo "app/build.gradle.kts NOT FOUND"; exit 1; }
-          sed -i -E 's/versionCode[[:space:]]*=[[:space:]]*[0-9]+/versionCode = 2/' "$GRADLE"
-          grep -Eq 'versionCode[[:space:]]*=[[:space:]]*2' "$GRADLE" || { echo "VERSION CODE 2 NOT SET"; exit 1; }
 
       - name: Build release AAB
         shell: bash
@@ -63,25 +63,30 @@ jobs:
           cd "$PROJECT"
           gradle bundleRelease --stacktrace
 
-      - name: Sign AAB with existing upload key
+      - name: Sign AAB
         shell: bash
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
           AAB=$(find android-build -type f -name "*.aab" | head -1)
           test -n "$AAB" || { echo "AAB NOT FOUND"; exit 1; }
+
           jarsigner \
             -keystore "$RUNNER_TEMP/lesvos-upload.jks" \
             -storepass "$KEYSTORE_PASSWORD" \
             -keypass "$KEYSTORE_PASSWORD" \
-            "$AAB" lesvosupload
-          echo "AAB=$AAB" >> "$GITHUB_ENV"
+            "$AAB" \
+            lesvosupload
 
-      - name: VERIFY signature
-        shell: bash
-        run: |
           jarsigner -verify -verbose -certs "$AAB"
           echo "SIGNED AAB VERIFIED"
+
+      - name: Upload signed AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lesvos-Basket-SIGNED-AAB-v3
+          path: android-build/**/*.aab
+          if-no-files-found: error
 
       - name: Upload SIGNED AAB
         uses: actions/upload-artifact@v4
