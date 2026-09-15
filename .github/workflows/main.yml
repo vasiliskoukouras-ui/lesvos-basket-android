@@ -1,4 +1,4 @@
-name: Build Signed Lesvos Basket Android
+name: Build VERIFIED Signed Lesvos Basket AAB
 
 on:
   workflow_dispatch:
@@ -11,63 +11,77 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Extract project
+      - name: Extract Android project
         shell: bash
         run: |
-          ZIP_FILE=$(find . -maxdepth 1 -type f -iname '*.zip' | head -n1)
-          test -n "$ZIP_FILE"
-          rm -rf android-build
+          ZIP=$(find . -maxdepth 1 -type f -name "*.zip" | head -1)
+          test -n "$ZIP" || { echo "ZIP NOT FOUND"; exit 1; }
           mkdir android-build
-          unzip -q "$ZIP_FILE" -d android-build
+          unzip -q "$ZIP" -d android-build
+          find android-build -name settings.gradle.kts -print
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Build AAB
+      - name: Generate upload keystore
         shell: bash
-        run: |
-          PROJECT=$(find android-build -type f -name "settings.gradle.kts" -print -quit)
-          PROJECT=$(dirname "$PROJECT")
-          cd "$PROJECT"
-          gradle bundleRelease
-
-      - name: Create upload key
-        shell: bash
-        env:
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           keytool -genkeypair \
-            -keystore upload-keystore.jks \
-            -storepass "$KEY_PASSWORD" \
-            -keypass "$KEY_PASSWORD" \
-            -alias lesvosbasket \
+            -keystore "$RUNNER_TEMP/lesvos-upload.jks" \
+            -storepass "LesvosBasket2026Secure" \
+            -keypass "LesvosBasket2026Secure" \
+            -alias lesvosupload \
             -keyalg RSA \
             -keysize 2048 \
             -validity 10000 \
             -dname "CN=Lesvos Basket, O=Lesvos Basket, C=GR"
 
+      - name: Build release AAB
+        shell: bash
+        run: |
+          PROJECT=$(dirname "$(find android-build -name settings.gradle.kts | head -1)")
+          cd "$PROJECT"
+          gradle bundleRelease --stacktrace
+
       - name: Sign AAB
         shell: bash
-        env:
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          AAB=$(find android-build -type f -path "*/outputs/bundle/release/*.aab" -print -quit)
-          test -n "$AAB"
+          AAB=$(find android-build -type f -name "*.aab" | head -1)
+          test -n "$AAB" || { echo "AAB NOT FOUND"; exit 1; }
 
           jarsigner \
-            -sigalg SHA256withRSA \
-            -digestalg SHA-256 \
-            -keystore upload-keystore.jks \
-            -storepass "$KEY_PASSWORD" \
-            -keypass "$KEY_PASSWORD" \
-            "$AAB" lesvosbasket
+            -keystore "$RUNNER_TEMP/lesvos-upload.jks" \
+            -storepass "LesvosBasket2026Secure" \
+            -keypass "LesvosBasket2026Secure" \
+            "$AAB" lesvosupload
 
-          jarsigner -verify
+      - name: VERIFY signature - FAIL if unsigned
+        shell: bash
+        run: |
+          AAB=$(find android-build -type f -name "*.aab" | head -1)
+          jarsigner -verify -verbose -certs "$AAB"
+          jarsigner -verify "$AAB" | grep -q "jar verified" || {
+            echo "SIGNATURE VERIFICATION FAILED"
+            exit 1
+          }
+          echo "SIGNED AAB VERIFIED SUCCESSFULLY"
+
+      - name: Upload SIGNED AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lesvos-Basket-SIGNED-AAB
+          path: android-build/**/*.aab
+
+      - name: Save upload key
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lesvos-Basket-UPLOAD-KEY-KEEP-SAFE
+          path: ${{ runner.temp }}/lesvos-upload.jks
