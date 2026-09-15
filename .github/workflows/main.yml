@@ -1,4 +1,5 @@
-name: Build VERIFIED Signed Lesvos Basket AAB
+
+       name: Build VERIFIED Signed Lesvos Basket AAB v2
 
 on:
   workflow_dispatch:
@@ -22,36 +23,55 @@ jobs:
         run: |
           ZIP=$(find . -maxdepth 1 -type f -name "*.zip" | head -1)
           test -n "$ZIP" || { echo "ZIP NOT FOUND"; exit 1; }
-          mkdir android-build
+          mkdir -p android-build
           unzip -q "$ZIP" -d android-build
-          find android-build -name settings.gradle.kts -print
+          SETTINGS=$(find android-build -name settings.gradle.kts | head -1)
+          test -n "$SETTINGS" || { echo "ANDROID PROJECT NOT FOUND"; exit 1; }
+
+      - name: Set versionCode 2
+        shell: bash
+        run: |
+          GRADLE=$(find android-build -path "*/app/build.gradle.kts" | head -1)
+          test -n "$GRADLE" || { echo "app/build.gradle.kts NOT FOUND"; exit 1; }
+
+          sed -i -E 's/versionCode[[:space:]]*=[[:space:]]*[0-9]+/versionCode = 2/' "$GRADLE"
+
+          echo "Checking versionCode..."
+          grep "versionCode" "$GRADLE"
+          grep -Eq 'versionCode[[:space:]]*=[[:space:]]*2' "$GRADLE" || {
+            echo "VERSION CODE 2 NOT SET"
+            exit 1
+          }
+
+      - name: Restore SAME upload keystore
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || {
+            echo "KEYSTORE_BASE64 SECRET MISSING"
+            exit 1
+          }
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/lesvos-upload.jks"
+          keytool -list \
+            -keystore "$RUNNER_TEMP/lesvos-upload.jks" \
+            -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
+            -alias lesvosupload > /dev/null
+          echo "EXISTING UPLOAD KEY RESTORED"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Generate upload keystore
-        shell: bash
-        run: |
-          keytool -genkeypair \
-            -keystore "$RUNNER_TEMP/lesvos-upload.jks" \
-            -storepass "LesvosBasket2026Secure" \
-            -keypass "LesvosBasket2026Secure" \
-            -alias lesvosupload \
-            -keyalg RSA \
-            -keysize 2048 \
-            -validity 10000 \
-            -dname "CN=Lesvos Basket, O=Lesvos Basket, C=GR"
-
-      - name: Build release AAB
+      - name: Build release AAB versionCode 2
         shell: bash
         run: |
           PROJECT=$(dirname "$(find android-build -name settings.gradle.kts | head -1)")
           cd "$PROJECT"
           gradle bundleRelease --stacktrace
 
-      - name: Sign AAB
+      - name: Sign AAB with SAME upload key
         shell: bash
         run: |
           AAB=$(find android-build -type f -name "*.aab" | head -1)
@@ -59,29 +79,22 @@ jobs:
 
           jarsigner \
             -keystore "$RUNNER_TEMP/lesvos-upload.jks" \
-            -storepass "LesvosBasket2026Secure" \
-            -keypass "LesvosBasket2026Secure" \
+            -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
+            -keypass "${{ secrets.KEYSTORE_PASSWORD }}" \
             "$AAB" lesvosupload
 
       - name: VERIFY signature - FAIL if unsigned
         shell: bash
         run: |
           AAB=$(find android-build -type f -name "*.aab" | head -1)
-          jarsigner -verify -verbose -certs "$AAB"
           jarsigner -verify "$AAB" | grep -q "jar verified" || {
             echo "SIGNATURE VERIFICATION FAILED"
             exit 1
           }
-          echo "SIGNED AAB VERIFIED SUCCESSFULLY"
+          echo "SIGNED AAB VERIFIED"
 
-      - name: Upload SIGNED AAB
+      - name: Upload VERIFIED AAB v2
         uses: actions/upload-artifact@v4
         with:
-          name: Lesvos-Basket-SIGNED-AAB
-          path: android-build/**/*.aab
-
-      - name: Save upload key
-        uses: actions/upload-artifact@v4
-        with:
-          name: Lesvos-Basket-UPLOAD-KEY-KEEP-SAFE
-          path: ${{ runner.temp }}/lesvos-upload.jks
+          name: Lesvos-Basket-SIGNED-AAB-v2
+          path: android-build/**/*.aab 
