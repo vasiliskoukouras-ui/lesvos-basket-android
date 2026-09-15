@@ -1,4 +1,4 @@
-name: Build Lesvos Basket Android
+name: Build Signed Lesvos Basket Android
 
 on:
   workflow_dispatch:
@@ -8,43 +8,66 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Find and extract Android ZIP
+      - name: Extract project
         shell: bash
         run: |
-          ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
+          ZIP_FILE=$(find . -maxdepth 1 -type f -iname '*.zip' | head -n1)
           test -n "$ZIP_FILE"
-          echo "Using $ZIP_FILE"
           rm -rf android-build
           mkdir android-build
           unzip -q "$ZIP_FILE" -d android-build
-          find android-build -maxdepth 3 -type f | head -50
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
 
-      - name: Build Android App Bundle
+      - name: Build AAB
         shell: bash
         run: |
-          PROJECT=$(find android-build -type f -name "settings.gradle.kts" -printf '%h\n' | head -n 1)
-          test -n "$PROJECT"
-          echo "Android project: $PROJECT"
+          PROJECT=$(find android-build -type f -name "settings.gradle.kts" -print -quit)
+          PROJECT=$(dirname "$PROJECT")
           cd "$PROJECT"
-          gradle bundleRelease --stacktrace
+          gradle bundleRelease
 
-      - name: Upload AAB
-        uses: actions/upload-artifact@v4
-        with:
-          name: Lesvos-Basket-AAB
-          path: android-build/**/build/outputs/bundle/release/*.aab
-          if-no-files-found: error
+      - name: Create upload key
+        shell: bash
+        env:
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          keytool -genkeypair \
+            -keystore upload-keystore.jks \
+            -storepass "$KEY_PASSWORD" \
+            -keypass "$KEY_PASSWORD" \
+            -alias lesvosbasket \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Lesvos Basket, O=Lesvos Basket, C=GR"
+
+      - name: Sign AAB
+        shell: bash
+        env:
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          AAB=$(find android-build -type f -path "*/outputs/bundle/release/*.aab" -print -quit)
+          test -n "$AAB"
+
+          jarsigner \
+            -sigalg SHA256withRSA \
+            -digestalg SHA-256 \
+            -keystore upload-keystore.jks \
+            -storepass "$KEY_PASSWORD" \
+            -keypass "$KEY_PASSWORD" \
+            "$AAB" lesvosbasket
+
+          jarsigner -verify
