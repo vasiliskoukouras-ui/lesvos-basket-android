@@ -32,7 +32,7 @@ jobs:
         run: |
           GRADLE=$(find android-build -path "*/app/build.gradle.kts" | head -1)
           test -n "$GRADLE" || { echo "app/build.gradle.kts NOT FOUND"; exit 1; }
-          sed -i -E 's/versionCode[[:space:]]*=[[:space:]]*[0-9]+/versionCode = 4/' "$GRADLE"
+          sed -i -E 's/versionCode[[:space:]]*=[[:space:]]*[0-9]+/versionCode = 5/' "$GRADLE"
           grep "versionCode" "$GRADLE"
                   sed -i -E 's/compileSdk[[:space:]]*=[[:space:]]*[0-9]+/compileSdk = 36/' "$GRADLE"
                   sed -i -E 's/targetSdk[[:space:]]*=[[:space:]]*[0-9]+/targetSdk = 36/' "$GRADLE"
